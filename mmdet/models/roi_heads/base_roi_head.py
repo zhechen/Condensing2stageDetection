@@ -15,15 +15,26 @@ class BaseRoIHead(nn.Module, metaclass=ABCMeta):
                  mask_head=None,
                  shared_head=None,
                  train_cfg=None,
-                 test_cfg=None):
+                 test_cfg=None,
+                 is_condensing=False):
         super(BaseRoIHead, self).__init__()
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         if shared_head is not None:
             self.shared_head = build_shared_head(shared_head)
 
+        self.is_condensing = is_condensing
         if bbox_head is not None:
             self.init_bbox_head(bbox_roi_extractor, bbox_head)
+            if self.is_condensing:
+                if isinstance(bbox_head, list):
+                    assert ('OKPD' in bbox_head[0]['type'])
+                else:
+                    assert ('OKPD' in bbox_head['type'])
+
+        #currently do not support condensing mask head 
+        if self.is_condensing:
+            assert mask_head is None #TODO: add mask head support
 
         if mask_head is not None:
             self.init_mask_head(mask_roi_extractor, mask_head)

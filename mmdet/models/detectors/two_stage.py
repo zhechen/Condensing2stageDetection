@@ -22,7 +22,9 @@ class TwoStageDetector(BaseDetector, RPNTestMixin):
                  roi_head=None,
                  train_cfg=None,
                  test_cfg=None,
-                 pretrained=None):
+                 condense_roi_head=None,
+                 pretrained=None, 
+                 reload_pretrained=False):
         super(TwoStageDetector, self).__init__()
         self.backbone = build_backbone(backbone)
 
@@ -42,11 +44,23 @@ class TwoStageDetector(BaseDetector, RPNTestMixin):
             roi_head.update(train_cfg=rcnn_train_cfg)
             roi_head.update(test_cfg=test_cfg.rcnn)
             self.roi_head = build_head(roi_head)
+        else:
+            self.roi_head = None
+
+        if condense_roi_head is not None:
+            rcnn_train_cfg = train_cfg.rcnn if train_cfg is not None else None
+            condense_roi_head.update(train_cfg=rcnn_train_cfg)
+            condense_roi_head.update(test_cfg=test_cfg.rcnn)
+            self.condense_roi_head = build_head(condense_roi_head)
 
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
 
-        self.init_weights(pretrained=pretrained)
+        if reload_pretrained and pretrained is not None:
+            self.init_weights(pretrained=None)
+            self.reload_pretrained_weights(pretrained)
+        else:
+            self.init_weights(pretrained=pretrained)
 
     @property
     def with_rpn(self):
@@ -55,6 +69,10 @@ class TwoStageDetector(BaseDetector, RPNTestMixin):
     @property
     def with_roi_head(self):
         return hasattr(self, 'roi_head') and self.roi_head is not None
+
+    @property
+    def with_condensed_head(self):
+        return hasattr(self, 'condense_roi_head') and self.condense_roi_head is not None
 
     def init_weights(self, pretrained=None):
         super(TwoStageDetector, self).init_weights(pretrained)
@@ -69,6 +87,14 @@ class TwoStageDetector(BaseDetector, RPNTestMixin):
             self.rpn_head.init_weights()
         if self.with_roi_head:
             self.roi_head.init_weights(pretrained)
+        if self.with_condensed_head:
+            self.condense_roi_head.init_weights(pretrained)
+
+    def reload_pretrained_weights(self, pretrained):
+        import logging
+        from mmcv.runner import load_checkpoint
+        logger = logging.getLogger()
+        load_checkpoint(self, pretrained, strict=False, logger=logger)
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck
@@ -152,11 +178,19 @@ class TwoStageDetector(BaseDetector, RPNTestMixin):
         else:
             proposal_list = proposals
 
-        roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
-                                                 gt_bboxes, gt_labels,
-                                                 gt_bboxes_ignore, gt_masks,
-                                                 **kwargs)
-        losses.update(roi_losses)
+        if self.with_roi_head:
+            roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
+                                                     gt_bboxes, gt_labels,
+                                                     gt_bboxes_ignore, gt_masks,
+                                                     **kwargs)
+            losses.update(roi_losses)
+
+        if self.with_condensed_head:
+            condense_roi_losses = self.condense_roi_head.forward_train(x, img_metas, proposal_list,
+                                                                       gt_bboxes, gt_labels,
+                                                                       gt_bboxes_ignore, gt_masks,
+                                                                       **kwargs)
+            losses.update(condense_roi_losses)
 
         return losses
 
@@ -188,8 +222,12 @@ class TwoStageDetector(BaseDetector, RPNTestMixin):
         else:
             proposal_list = proposals
 
-        return self.roi_head.simple_test(
-            x, proposal_list, img_metas, rescale=rescale)
+        if self.with_condensed_head:
+            return self.condense_roi_head.simple_test(
+                x, proposal_list, img_metas, rescale=rescale)
+        else:
+            return self.roi_head.simple_test(
+                x, proposal_list, img_metas, rescale=rescale)
 
     def aug_test(self, imgs, img_metas, rescale=False):
         """Test with augmentations.
