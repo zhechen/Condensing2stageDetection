@@ -44,7 +44,7 @@ class OKPDBBoxHead(BBoxHead):
                 self.num_shared_convs, self.in_channels)
         self.shared_out_channels = last_layer_dim
 
-        #self.dropout = nn.Dropout(p=0.05)
+        self.dropout = nn.Dropout(p=0.01)
         self.use_fc = (fc_out_channels > 0)
         if self.use_fc:
             self.feat_fc = nn.Linear(last_layer_dim, fc_out_channels)
@@ -153,7 +153,7 @@ class OKPDBBoxHead(BBoxHead):
         kp_feat = kp_feat.permute( (1,2,0) )
         kp_feat = kp_feat.reshape(x.size(0), -1)
         fc_feat = torch.cat( (global_x, kp_feat, kp_gen_data), 1) #
-        #fc_feat = self.dropout(fc_feat)
+        fc_feat = self.dropout(fc_feat)
         if self.use_fc:
             fc_feat = F.relu(self.feat_fc(fc_feat))
 
